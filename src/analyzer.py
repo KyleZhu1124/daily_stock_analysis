@@ -3672,15 +3672,32 @@ class GeminiAnalyzer:
                         try:
                             from datetime import datetime, timedelta
                             end_date = datetime.now().strftime('%Y-%m-%d')
-                            # 拉取3-5年数据（ML需要更多数据训练）
-                            start_date = (datetime.now() - timedelta(days=365*4)).strftime('%Y-%m-%d')
                             
-                            # 直接使用 baostock 获取数据（最可靠的数据源）
+                            # 渐进式数据获取：先尝试4年，不足则逐步减少
                             from data_provider.baostock_fetcher import BaostockFetcher
                             baostock_fetcher = BaostockFetcher()
-                            historical_df = baostock_fetcher.get_daily_data(code, start_date, end_date)
-                            if historical_df is not None and not historical_df.empty:
-                                logger.info(f"[ML诊断] 从 baostock 获取到 {len(historical_df)} 条历史数据（{len(historical_df)//252}年）")
+                            
+                            # 尝试的时间范围（从长到短）
+                            time_ranges = [
+                                (365*4, "4年"),
+                                (365*3, "3年"),
+                                (365*2, "2年"),
+                                (365*1, "1年"),
+                            ]
+                            
+                            historical_df = None
+                            for days, desc in time_ranges:
+                                start_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
+                                historical_df = baostock_fetcher.get_daily_data(code, start_date, end_date)
+                                
+                                if historical_df is not None and len(historical_df) >= 60:
+                                    logger.info(f"[ML诊断] 从 baostock 获取到 {len(historical_df)} 条历史数据（{desc}）")
+                                    break
+                                else:
+                                    logger.debug(f"[ML诊断] {desc}数据不足({len(historical_df) if historical_df is not None else 0}条)，尝试更短时间范围")
+                            
+                            if historical_df is None or len(historical_df) < 60:
+                                logger.warning(f"[ML诊断] {name}({code}) 历史数据严重不足({len(historical_df) if historical_df is not None else 0}条)，无法进行ML训练")
                         except Exception as fetch_exc:
                             logger.debug(f"[ML诊断] 获取历史数据失败: {fetch_exc}")
                     

@@ -70,7 +70,7 @@ class TrendPredictor:
     
     def train(self, df: pd.DataFrame, n_splits: int = 5) -> Dict:
         """
-        训练模型（回归任务 + 自动调参）
+        训练模型（回归任务 + 自动调参 + 自适应数据量）
         
         Args:
             df: 历史数据
@@ -85,9 +85,21 @@ class TrendPredictor:
         
         X, y = self.prepare_training_data(df)
         
-        if len(X) < 100:
-            logger.warning(f"训练数据不足: {len(X)} 行")
-            return {'error': 'Insufficient data'}
+        # 自适应数据量检查
+        n_samples = len(X)
+        if n_samples < 60:
+            logger.warning(f"训练数据严重不足: {n_samples} 行，无法训练")
+            return {'error': f'Insufficient data: only {n_samples} samples (need at least 60)'}
+        
+        # 动态调整交叉验证折数
+        if n_samples < 200:
+            n_splits = 3
+            logger.info(f"数据量较少({n_samples}行)，使用3折交叉验证")
+        elif n_samples < 400:
+            n_splits = 4
+            logger.info(f"数据量中等({n_samples}行)，使用4折交叉验证")
+        else:
+            logger.info(f"数据量充足({n_samples}行)，使用{n_splits}折交叉验证")
         
         # 时间序列交叉验证
         tscv = TimeSeriesSplit(n_splits=n_splits)
