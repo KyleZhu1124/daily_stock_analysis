@@ -3672,14 +3672,15 @@ class GeminiAnalyzer:
                         try:
                             from datetime import datetime, timedelta
                             end_date = datetime.now().strftime('%Y-%m-%d')
-                            start_date = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
+                            # 拉取3-5年数据（ML需要更多数据训练）
+                            start_date = (datetime.now() - timedelta(days=365*4)).strftime('%Y-%m-%d')
                             
                             # 直接使用 baostock 获取数据（最可靠的数据源）
                             from data_provider.baostock_fetcher import BaostockFetcher
                             baostock_fetcher = BaostockFetcher()
                             historical_df = baostock_fetcher.get_daily_data(code, start_date, end_date)
                             if historical_df is not None and not historical_df.empty:
-                                logger.info(f"[ML诊断] 从 baostock 获取到 {len(historical_df)} 条历史数据")
+                                logger.info(f"[ML诊断] 从 baostock 获取到 {len(historical_df)} 条历史数据（{len(historical_df)//252}年）")
                         except Exception as fetch_exc:
                             logger.debug(f"[ML诊断] 获取历史数据失败: {fetch_exc}")
                     

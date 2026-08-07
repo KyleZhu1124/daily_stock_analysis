@@ -41,21 +41,20 @@ class TrendPredictor:
     
     def prepare_training_data(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series]:
         """
-        准备训练数据
+        准备训练数据（回归任务）
         
         Args:
             df: 包含OHLCV的历史数据
         
         Returns:
             X: 特征矩阵
-            y: 标签（未来N天涨跌）
+            y: 标签（未来N天涨跌幅，连续值）
         """
         # 计算特征
         df = self.feature_eng.compute_features(df)
         
-        # 创建标签：未来N天是否上涨
+        # 创建标签：未来N天涨跌幅（回归任务）
         df['future_return'] = df['close'].shift(-self.prediction_horizon) / df['close'] - 1
-        df['label'] = (df['future_return'] > 0.02).astype(int)  # 上涨>2%为正样本
         
         # 删除NaN行
         df = df.dropna()
@@ -65,13 +64,13 @@ class TrendPredictor:
         feature_cols = [col for col in feature_cols if col in df.columns]
         
         X = df[feature_cols]
-        y = df['label']
+        y = df['future_return']  # 连续值，不是分类
         
         return X, y
     
     def train(self, df: pd.DataFrame, n_splits: int = 5) -> Dict:
         """
-        训练模型
+        训练模型（回归任务 + 自动调参）
         
         Args:
             df: 历史数据
@@ -94,59 +93,97 @@ class TrendPredictor:
         tscv = TimeSeriesSplit(n_splits=n_splits)
         cv_scores = []
         
-        params = {
-            'objective': 'binary',
-            'metric': 'auc',
-            'boosting_type': 'gbdt',
-            'num_leaves': 31,
-            'learning_rate': 0.05,
-            'feature_fraction': 0.8,
-            'bagging_fraction': 0.8,
-            'bagging_freq': 5,
-            'verbose': -1,
-            'random_state': 42
-        }
+        # 参数网格（自动调参）
+        param_grid = [
+            {
+                'num_leaves': 31,
+                'learning_rate': 0.05,
+                'feature_fraction': 0.8,
+                'bagging_fraction': 0.8,
+            },
+            {
+                'num_leaves': 63,
+                'learning_rate': 0.03,
+                'feature_fraction': 0.9,
+                'bagging_fraction': 0.7,
+            },
+            {
+                'num_leaves': 15,
+                'learning_rate': 0.1,
+                'feature_fraction': 0.7,
+                'bagging_fraction': 0.9,
+            },
+        ]
         
-        for train_idx, val_idx in tscv.split(X):
-            X_train, X_val = X.iloc[train_idx], X.iloc[val_idx]
-            y_train, y_val = y.iloc[train_idx], y.iloc[val_idx]
-            
-            train_data = lgb.Dataset(X_train, label=y_train)
-            val_data = lgb.Dataset(X_val, label=y_val, reference=train_data)
-            
-            model = lgb.train(
-                params,
-                train_data,
-                num_boost_round=100,
-                valid_sets=[val_data],
-                callbacks=[lgb.early_stopping(10), lgb.log_evaluation(0)]
-            )
-            
-            y_pred = model.predict(X_val)
-            auc = roc_auc_score(y_val, y_pred)
-            cv_scores.append(auc)
+        best_params = None
+        best_score = float('inf')  # MSE越小越好
         
-        # 用全部数据训练最终模型
+        for params in param_grid:
+            full_params = {
+                'objective': 'regression',
+                'metric': 'mse',
+                'boosting_type': 'gbdt',
+                'verbose': -1,
+                'random_state': 42,
+                **params
+            }
+            
+            fold_scores = []
+            for train_idx, val_idx in tscv.split(X):
+                X_train, X_val = X.iloc[train_idx], X.iloc[val_idx]
+                y_train, y_val = y.iloc[train_idx], y.iloc[val_idx]
+                
+                train_data = lgb.Dataset(X_train, label=y_train)
+                val_data = lgb.Dataset(X_val, label=y_val, reference=train_data)
+                
+                model = lgb.train(
+                    full_params,
+                    train_data,
+                    num_boost_round=200,
+                    valid_sets=[val_data],
+                    callbacks=[lgb.early_stopping(20), lgb.log_evaluation(0)]
+                )
+                
+                y_pred = model.predict(X_val)
+                mse = np.mean((y_val - y_pred) ** 2)
+                fold_scores.append(mse)
+            
+            avg_mse = np.mean(fold_scores)
+            if avg_mse < best_score:
+                best_score = avg_mse
+                best_params = full_params
+        
+        logger.info(f"最优参数: num_leaves={best_params['num_leaves']}, lr={best_params['learning_rate']}")
+        
+        # 用最优参数和全部数据训练最终模型
         full_train_data = lgb.Dataset(X, label=y)
-        self.model = lgb.train(params, full_train_data, num_boost_round=100)
+        self.model = lgb.train(best_params, full_train_data, num_boost_round=200)
         self.is_trained = True
         
+        # 计算R²分数（解释方差比例）
+        from sklearn.metrics import r2_score, mean_squared_error
+        y_pred_all = self.model.predict(X)
+        r2 = r2_score(y, y_pred_all)
+        rmse = np.sqrt(mean_squared_error(y, y_pred_all))
+        
         metrics = {
-            'cv_auc_mean': np.mean(cv_scores),
-            'cv_auc_std': np.std(cv_scores),
-            'cv_scores': cv_scores,
+            'cv_mse_mean': best_score,
+            'cv_mse_std': np.std(fold_scores) if fold_scores else 0,
+            'r2_score': r2,
+            'rmse': rmse,
+            'best_params': {k: best_params[k] for k in ['num_leaves', 'learning_rate', 'feature_fraction', 'bagging_fraction']},
             'n_samples': len(X),
-            'n_positive': int(y.sum()),
-            'n_negative': int(len(y) - y.sum())
+            'y_mean': float(y.mean()),
+            'y_std': float(y.std()),
         }
         
-        logger.info(f"模型训练完成: AUC={metrics['cv_auc_mean']:.3f}±{metrics['cv_auc_std']:.3f}")
+        logger.info(f"模型训练完成: RMSE={metrics['rmse']:.4f}, R²={metrics['r2_score']:.3f}")
         
         return metrics
     
     def predict(self, df: pd.DataFrame) -> Dict:
         """
-        预测未来趋势
+        预测未来涨跌幅（回归任务）
         
         Args:
             df: 最新的历史数据（至少需要120天）
@@ -172,21 +209,27 @@ class TrendPredictor:
         X_pred = last_row[feature_cols]
         
         if self.is_trained and self.model is not None:
-            # 使用训练好的模型
-            prob = self.model.predict(X_pred)[0]
-            prediction = 1 if prob > 0.5 else 0
-            confidence = abs(prob - 0.5) * 2  # 归一化到0-1
+            # 使用训练好的模型预测涨跌幅
+            predicted_return = self.model.predict(X_pred)[0]
             
-            # 计算涨跌幅预测
-            expected_return = self._estimate_return(df, prob)
+            # 计算置信度（基于历史预测误差）
+            # 这里简化处理，使用预测值的绝对值作为置信度
+            confidence = min(abs(predicted_return) * 10, 1.0)  # 归一化到0-1
+            
+            # 转换为涨跌概率（基于预测涨跌幅）
+            # 如果预测涨幅>0，则上涨概率>0.5
+            if predicted_return > 0:
+                probability = 0.5 + min(predicted_return * 5, 0.4)  # 最大0.9
+            else:
+                probability = 0.5 + max(predicted_return * 5, -0.4)  # 最小0.1
             
             return {
-                'prediction': prediction,  # 1=上涨, 0=下跌
-                'probability': prob,
+                'prediction': 1 if predicted_return > 0 else 0,  # 1=上涨, 0=下跌
+                'probability': probability,  # 上涨概率
                 'confidence': confidence,
-                'expected_return': expected_return,  # 预期涨跌幅
+                'expected_return': round(predicted_return * 100, 2),  # 预期涨跌幅（百分比）
                 'horizon_days': self.prediction_horizon,
-                'model_type': 'lightgbm'
+                'model_type': 'lightgbm_regression'
             }
         else:
             # 规则-based预测（fallback）

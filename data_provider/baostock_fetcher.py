@@ -223,9 +223,10 @@ class BaostockFetcher(BaseFetcher):
             try:
                 # 查询日线数据
                 # adjustflag: 1-后复权，2-前复权，3-不复权
+                # 获取更多字段：换手率、市盈率、市净率等
                 rs = bs.query_history_k_data_plus(
                     code=bs_code,
-                    fields="date,open,high,low,close,volume,amount,pctChg",
+                    fields="date,open,high,low,close,volume,amount,turn,pctChg,peTTM,pbMRQ,psTTM,pcfNcfTTM,isST",
                     start_date=start_date,
                     end_date=end_date,
                     frequency="d",  # 日线
