@@ -627,6 +627,7 @@ class DataFetcherManager:
         "LongbridgeFetcher": {"hk", "us"},
         "FinnhubFetcher": {"us"},
         "AlphaVantageFetcher": {"us"},
+        "TwelveDataFetcher": {"cn", "hk", "us"},
     }
     _daily_source_health = CircuitBreaker(failure_threshold=3, cooldown_seconds=300.0)
     _CONCEPT_RANKINGS_CACHE_TTL_SECONDS = 300.0
@@ -1213,6 +1214,13 @@ class DataFetcherManager:
             optional_fetchers.append(AlphaVantageFetcher())
         else:
             logger.debug("[数据源初始化] 跳过未配置的 AlphaVantageFetcher")
+
+        twelvedata_api_key = (getattr(config, "twelvedata_api_key", None) or "").strip()
+        if twelvedata_api_key:
+            from .twelvedata_fetcher import TwelveDataFetcher
+            optional_fetchers.append(TwelveDataFetcher())
+        else:
+            logger.debug("[数据源初始化] 跳过未配置的 TwelveDataFetcher")
 
         # 初始化数据源列表
         self._ensure_concurrency_guards()
