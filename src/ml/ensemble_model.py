@@ -103,11 +103,9 @@ class EnsembleModel:
         
         # 训练每个模型
         for name, model in self.models.items():
-            print(f"训练 {name}...")
-            
             if name == 'catboost' and self.task_type == 'classification':
                 # CatBoost分类需要特殊处理
-                model.fit(X_train, y_train, eval_set=(X_val, y_val) if X_val is not None else None)
+                model.fit(X_train, y_train, eval_set=(X_val, y_val) if X_val is not None else None, verbose=False)
             else:
                 model.fit(X_train, y_train)
             
@@ -121,15 +119,12 @@ class EnsembleModel:
                         auc = roc_auc_score(y_val, y_prob)
                         acc = accuracy_score(y_val, y_pred)
                         metrics[name] = {'auc': auc, 'accuracy': acc}
-                        print(f"  {name} - AUC: {auc:.4f}, Accuracy: {acc:.4f}")
                     else:
                         mse = mean_squared_error(y_val, y_pred)
                         metrics[name] = {'mse': mse}
-                        print(f"  {name} - MSE: {mse:.4f}")
                 else:
                     mse = mean_squared_error(y_val, y_pred)
                     metrics[name] = {'mse': mse}
-                    print(f"  {name} - MSE: {mse:.4f}")
         
         # 计算权重（基于验证集性能）
         if X_val is not None and self.task_type == 'classification':
@@ -246,13 +241,11 @@ class StockPredictor:
         print(f"训练集大小: {len(X_train)}, 验证集大小: {len(X_val)}")
         
         # 训练分类模型
-        print("\n=== 训练分类模型（涨跌预测）===")
         class_metrics = self.classification_model.train(
             X_train, y_class_train, X_val, y_class_val
         )
         
         # 训练回归模型
-        print("\n=== 训练回归模型（涨幅预测）===")
         reg_metrics = self.regression_model.train(
             X_train, y_reg_train, X_val, y_reg_val
         )

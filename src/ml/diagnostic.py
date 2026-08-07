@@ -60,10 +60,7 @@ class MLDiagnostician:
                 logger.info(f"[{stock_code}] 训练趋势预测模型（使用{len(df)}天历史数据）...")
                 train_metrics = self.trend_predictor.train(df)
                 result['train_metrics'] = train_metrics
-                logger.info(f"[{stock_code}] 模型训练完成: AUC={train_metrics.get('cv_auc_mean', 0):.3f}")
-            
-            # 2. 趋势预测
-            logger.info(f"[{stock_code}] 进行趋势预测...")
+            logger.info(f"[{stock_code}] 模型训练完成: RMSE={train_metrics.get('rmse', 0):.4f}, R²={train_metrics.get('r2_score', 0):.3f}")
             trend_prediction = self.trend_predictor.predict(df)
             result['trend'] = trend_prediction
             
@@ -153,9 +150,10 @@ class MLDiagnostician:
             metrics = result['train_metrics']
             if 'error' not in metrics:
                 lines.append("## 📚 模型训练指标")
-                lines.append(f"- 交叉验证AUC: {metrics.get('cv_auc_mean', 0):.3f} ± {metrics.get('cv_auc_std', 0):.3f}")
+                lines.append(f"- RMSE: {metrics.get('rmse', 0):.4f}")
+                lines.append(f"- R²: {metrics.get('r2_score', 0):.3f}")
                 lines.append(f"- 训练样本数: {metrics.get('n_samples', 0)}")
-                lines.append(f"- 正样本比例: {metrics.get('n_positive', 0) / metrics.get('n_samples', 1):.1%}\n")
+                lines.append(f"- 交叉验证折数: {metrics.get('n_splits', 0)}\n")
         
         # 趋势预测
         if 'trend' in result:
