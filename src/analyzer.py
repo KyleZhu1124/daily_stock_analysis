@@ -98,6 +98,14 @@ from src.schemas.decision_scale import (
     CANONICAL_DECISION_SCALE_PROMPT_ZH,
     score_band_metadata,
 )
+
+# ML 诊断集成
+try:
+    from src.ml.integration import integrate_ml_analysis
+    ML_INTEGRATION_AVAILABLE = True
+except ImportError:
+    ML_INTEGRATION_AVAILABLE = False
+    logger.debug("ML integration module not available")
 from src.schemas.report_schema import AnalysisReportSchema
 from src.market_context import detect_market, get_market_role, get_market_guidelines
 from src.services.daily_market_context import format_daily_market_context_prompt_section
@@ -3647,6 +3655,23 @@ class GeminiAnalyzer:
                 persist_llm_usage(llm_usage, model_used, call_type="analysis", stock_code=code)
 
             logger.info(f"[LLM解析] {name}({code}) 分析完成: {result.trend_prediction}, 评分 {result.sentiment_score}")
+
+            # ML 诊断集成
+            if ML_INTEGRATION_AVAILABLE:
+                try:
+                    logger.info(f"[ML诊断] 开始对 {name}({code}) 进行机器学习分析...")
+                    # 从 context 中提取历史数据
+                    historical_df = context.get('history') or context.get('historical_data') or context.get('kline')
+                    if historical_df is not None and not historical_df.empty:
+                        ml_result = integrate_ml_analysis(code, historical_df, llm_analysis=result.analysis_summary)
+                        if ml_result and 'combined_analysis' in ml_result:
+                            # 将 ML 分析结果附加到报告中
+                            result.analysis_summary = ml_result['combined_analysis']
+                            logger.info(f"[ML诊断] {name}({code}) 机器学习分析完成")
+                    else:
+                        logger.warning(f"[ML诊断] {name}({code}) 未找到历史数据，跳过 ML 分析")
+                except Exception as ml_exc:
+                    logger.warning(f"[ML诊断] {name}({code}) 机器学习分析失败: {ml_exc}")
 
             return result
             
