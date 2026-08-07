@@ -163,8 +163,15 @@ class MLDiagnostician:
                 lines.append("## 📈 趋势预测")
                 pred_text = "上涨" if trend.get('prediction') == 1 else "下跌"
                 lines.append(f"- 预测方向: {pred_text}")
-                lines.append(f"- 预测概率: {trend.get('probability', 0):.1%}")
+                lines.append(f"- 上涨概率: {trend.get('probability', 0):.1%}")
                 lines.append(f"- 置信度: {trend.get('confidence', 0):.1%}")
+                expected_return = trend.get('expected_return', 0)
+                if expected_return > 0:
+                    lines.append(f"- 预期涨幅: +{expected_return:.2f}%")
+                elif expected_return < 0:
+                    lines.append(f"- 预期跌幅: {expected_return:.2f}%")
+                else:
+                    lines.append(f"- 预期涨跌幅: {expected_return:.2f}%")
                 lines.append(f"- 预测周期: {trend.get('horizon_days', 5)}天")
                 lines.append(f"- 模型类型: {trend.get('model_type', 'unknown')}")
                 

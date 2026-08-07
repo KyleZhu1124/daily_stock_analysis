@@ -177,18 +177,56 @@ class TrendPredictor:
             prediction = 1 if prob > 0.5 else 0
             confidence = abs(prob - 0.5) * 2  # 归一化到0-1
             
+            # 计算涨跌幅预测
+            expected_return = self._estimate_return(df, prob)
+            
             return {
                 'prediction': prediction,  # 1=上涨, 0=下跌
                 'probability': prob,
                 'confidence': confidence,
+                'expected_return': expected_return,  # 预期涨跌幅
                 'horizon_days': self.prediction_horizon,
                 'model_type': 'lightgbm'
             }
         else:
             # 规则-based预测（fallback）
-            return self._rule_based_prediction(last_row)
+            return self._rule_based_prediction(last_row, df)
     
-    def _rule_based_prediction(self, row: pd.DataFrame) -> Dict:
+    def _estimate_return(self, df: pd.DataFrame, prob: float) -> float:
+        """
+        估算预期涨跌幅
+        
+        基于历史波动率和预测概率计算预期收益
+        
+        Args:
+            df: 历史数据
+            prob: 上涨概率
+            
+        Returns:
+            预期涨跌幅（百分比）
+        """
+        try:
+            # 计算历史波动率
+            returns = df['close'].pct_change().dropna()
+            volatility = returns.std() * np.sqrt(self.prediction_horizon)  # 预测期波动率
+            
+            # 基于概率和波动率计算预期收益
+            # 上涨时：prob * volatility * 0.5
+            # 下跌时：(1-prob) * volatility * -0.5
+            if prob > 0.5:
+                expected_return = (prob - 0.5) * 2 * volatility * 100  # 转为百分比
+            else:
+                expected_return = (prob - 0.5) * 2 * volatility * 100
+            
+            # 限制在合理范围内
+            expected_return = max(-20, min(20, expected_return))
+            
+            return round(expected_return, 2)
+        except Exception as e:
+            logger.error(f"估算涨跌幅失败: {e}")
+            return 0.0
+    
+    def _rule_based_prediction(self, row: pd.DataFrame, df: pd.DataFrame = None) -> Dict:
         """
         基于规则的预测（当模型不可用时）
         """
@@ -251,10 +289,16 @@ class TrendPredictor:
         prediction = 1 if prob > 0.5 else 0
         confidence = abs(prob - 0.5) * 2
         
+        # 估算涨跌幅
+        expected_return = 0.0
+        if df is not None:
+            expected_return = self._estimate_return(df, prob)
+        
         return {
             'prediction': prediction,
             'probability': prob,
             'confidence': confidence,
+            'expected_return': expected_return,
             'horizon_days': self.prediction_horizon,
             'model_type': 'rule_based',
             'signals': signals
