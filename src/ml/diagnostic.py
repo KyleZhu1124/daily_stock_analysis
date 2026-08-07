@@ -170,12 +170,12 @@ class MLDiagnostician:
                 
                 if 'signals' in trend:
                     lines.append(f"- 技术信号: {', '.join(trend['signals'])}")
-                lines.append()
+                lines.append("")
         
         # 风险评估
         if 'risk' in result:
             lines.append(self.risk_assessor.format_risk_report(result['risk']))
-            lines.append()
+            lines.append("")
         
         # 综合结论
         if 'conclusion' in result:
