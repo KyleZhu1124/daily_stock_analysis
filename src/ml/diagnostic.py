@@ -29,14 +29,14 @@ class MLDiagnostician:
         self.risk_assessor = RiskAssessor()
         self.feature_eng = FeatureEngineering()
     
-    def diagnose(self, stock_code: str, df: pd.DataFrame, train_model: bool = False) -> Dict:
+    def diagnose(self, stock_code: str, df: pd.DataFrame, train_model: bool = True) -> Dict:
         """
         对单只股票进行ML诊断
         
         Args:
             stock_code: 股票代码
             df: 历史OHLCV数据
-            train_model: 是否训练模型（首次使用或定期更新时设为True）
+            train_model: 是否训练模型（默认True，每次都训练）
         
         Returns:
             诊断结果字典
@@ -55,11 +55,12 @@ class MLDiagnostician:
         }
         
         try:
-            # 1. 训练模型（如果需要）
+            # 1. 训练模型（每次都训练，使用所有历史数据）
             if train_model:
-                logger.info(f"[{stock_code}] 训练趋势预测模型...")
+                logger.info(f"[{stock_code}] 训练趋势预测模型（使用{len(df)}天历史数据）...")
                 train_metrics = self.trend_predictor.train(df)
                 result['train_metrics'] = train_metrics
+                logger.info(f"[{stock_code}] 模型训练完成: AUC={train_metrics.get('cv_auc_mean', 0):.3f}")
             
             # 2. 趋势预测
             logger.info(f"[{stock_code}] 进行趋势预测...")
