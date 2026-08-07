@@ -296,6 +296,15 @@ jobs:
           LONGBRIDGE_PUSH_CANDLESTICK_MODE: ${{ vars.LONGBRIDGE_PUSH_CANDLESTICK_MODE || secrets.LONGBRIDGE_PUSH_CANDLESTICK_MODE }}
           LONGBRIDGE_PRINT_QUOTE_PACKAGES: ${{ vars.LONGBRIDGE_PRINT_QUOTE_PACKAGES || secrets.LONGBRIDGE_PRINT_QUOTE_PACKAGES }}
           
+          # Alpha Vantage（全球股票数据，免费 500 次/天）
+          ALPHAVANTAGE_API_KEY: ${{ secrets.ALPHAVANTAGE_API_KEY }}
+          
+          # Finnhub（实时行情和新闻，免费 60 次/分钟）
+          FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
+          
+          # Twelve Data（技术指标丰富，免费 800 次/天）
+          TWELVEDATA_API_KEY: ${{ secrets.TWELVEDATA_API_KEY }}
+          
           # ==========================================
           # 搜索服务
           # ==========================================
