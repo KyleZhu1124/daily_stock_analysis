@@ -128,6 +128,109 @@ class TwelveDataFetcher(BaseFetcher):
             # 美股或其他
             return stock_code
     
+    def _fetch_raw_data(self, stock_code: str, start_date: str, end_date: str):
+        """
+        获取原始数据（实现 BaseFetcher 抽象方法）
+        
+        Args:
+            stock_code: 股票代码
+            start_date: 开始日期 YYYY-MM-DD
+            end_date: 结束日期 YYYY-MM-DD
+            
+        Returns:
+            DataFrame 原始数据
+        """
+        if not self.enabled:
+            raise Exception("Twelve Data API key not configured")
+        
+        try:
+            symbol = self._convert_symbol(stock_code)
+            
+            url = f"{self.base_url}/time_series"
+            params = {
+                "symbol": symbol,
+                "interval": "1day",
+                "outputsize": 100,  # 获取更多数据
+                "apikey": self.api_key
+            }
+            
+            response = requests.get(url, params=params, timeout=15)
+            response.raise_for_status()
+            data = response.json()
+            
+            if "code" in data and data["code"] != 200:
+                raise Exception(f"Twelve Data API error: {data.get('message', 'Unknown error')}")
+            
+            values = data.get("values", [])
+            if not values:
+                raise Exception(f"No data returned for {stock_code}")
+            
+            # 转换为 DataFrame
+            rows = []
+            for item in values:
+                rows.append({
+                    "date": item.get("datetime"),
+                    "open": float(item.get("open", 0)),
+                    "high": float(item.get("high", 0)),
+                    "low": float(item.get("low", 0)),
+                    "close": float(item.get("close", 0)),
+                    "volume": int(item.get("volume", 0))
+                })
+            
+            df = pd.DataFrame(rows)
+            df["date"] = pd.to_datetime(df["date"])
+            
+            # 过滤日期范围
+            start = pd.to_datetime(start_date)
+            end = pd.to_datetime(end_date)
+            df = df[(df["date"] >= start) & (df["date"] <= end)]
+            
+            return df
+            
+        except Exception as e:
+            logger.error(f"[TwelveData] 获取 {stock_code} 原始数据失败: {e}")
+            raise
+    
+    def _normalize_data(self, df, stock_code: str):
+        """
+        标准化数据格式（实现 BaseFetcher 抽象方法）
+        
+        Args:
+            df: 原始 DataFrame
+            stock_code: 股票代码
+            
+        Returns:
+            标准化的 DataFrame
+        """
+        if df.empty:
+            return df
+        
+        # 计算涨跌幅
+        df["pct_chg"] = df["close"].pct_change() * 100
+        df["pct_chg"] = df["pct_chg"].fillna(0)
+        
+        # 计算成交额（近似值）
+        df["amount"] = df["close"] * df["volume"]
+        
+        # 添加股票代码列
+        df["code"] = stock_code
+        
+        # 重命名列以匹配标准格式
+        df = df.rename(columns={
+            "date": "date",
+            "open": "open",
+            "high": "high",
+            "low": "low",
+            "close": "close",
+            "volume": "volume"
+        })
+        
+        # 选择标准列
+        standard_columns = ["code", "date", "open", "high", "low", "close", "volume", "amount", "pct_chg"]
+        df = df[standard_columns]
+        
+        return df
+    
     def get_daily_data(self, stock_code: str, days: int = 30) -> Optional[List[Dict[str, Any]]]:
         """
         获取日线数据
