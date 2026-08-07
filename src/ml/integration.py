@@ -63,6 +63,9 @@ class MLAnalysisIntegrator:
             
             result['ml_diagnostics'] = ml_result
             
+            # 计算 ML 评分
+            result['ml_score'] = self._calculate_ml_score(ml_result)
+            
             # 合并LLM分析和ML诊断
             if llm_analysis:
                 result['combined_analysis'] = self._combine_analyses(llm_analysis, ml_result)
@@ -75,6 +78,48 @@ class MLAnalysisIntegrator:
             result['combined_analysis'] = llm_analysis or f"ML诊断失败: {str(e)}"
         
         return result
+    
+    def _calculate_ml_score(self, ml_result: Dict) -> int:
+        """
+        根据 ML 诊断结果计算综合评分 (0-100)
+        
+        评分逻辑：
+        - 趋势预测方向 (40%): 看涨 +40, 看跌 +0
+        - 趋势置信度 (30%): confidence * 30
+        - 风险评分 (30%): (100 - risk_score) * 0.3
+        
+        Args:
+            ml_result: ML 诊断结果
+            
+        Returns:
+            综合评分 (0-100)
+        """
+        try:
+            trend = ml_result.get('trend', {})
+            risk = ml_result.get('risk', {})
+            
+            # 趋势方向得分 (0-40)
+            trend_score = 0
+            if trend.get('prediction') == 1:  # 看涨
+                trend_score = 40
+            
+            # 趋势置信度得分 (0-30)
+            confidence = trend.get('confidence', 0)
+            confidence_score = confidence * 30
+            
+            # 风险得分 (0-30) - 风险越低得分越高
+            risk_score = risk.get('risk_score', 50)
+            risk_component = (100 - risk_score) * 0.3
+            
+            # 综合评分
+            total_score = trend_score + confidence_score + risk_component
+            
+            # 确保在 0-100 范围内
+            return max(0, min(100, int(total_score)))
+            
+        except Exception as e:
+            logger.error(f"计算 ML 评分失败: {str(e)}")
+            return 50  # 默认中等评分
     
     def _combine_analyses(self, llm_analysis: str, ml_result: Dict) -> str:
         """
