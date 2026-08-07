@@ -803,6 +803,9 @@ class StockAnalysisPipeline:
                 fill_price_position_if_needed(result, trend_result, realtime_quote)
                 action_source_advice = getattr(result, "operation_advice", None)
                 stabilize_decision_with_structure(result, trend_result, fundamental_context)
+                # 保存技术评分到结果
+                if trend_result and hasattr(trend_result, 'signal_score'):
+                    result.technical_score = trend_result.signal_score
                 adjustments = apply_phase_decision_guardrails(
                     result,
                     market_phase_summary=market_phase_summary,

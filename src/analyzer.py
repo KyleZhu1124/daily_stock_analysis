@@ -1694,6 +1694,10 @@ class AnalysisResult:
     action: Optional[str] = None  # 建议动作 taxonomy：buy/add/hold/reduce/sell/watch/avoid/alert
     action_label: Optional[str] = None  # 本地化建议动作标签
 
+    # ========== 分项评分 ==========
+    technical_score: Optional[int] = None  # 技术评分（数学计算）0-100
+    ml_score: Optional[int] = None  # ML评分 0-100
+
     # ========== 决策仪表盘 (新增) ==========
     dashboard: Optional[Dict[str, Any]] = None  # 完整的决策仪表盘数据
 
@@ -3660,13 +3664,34 @@ class GeminiAnalyzer:
             if ML_INTEGRATION_AVAILABLE:
                 try:
                     logger.info(f"[ML诊断] 开始对 {name}({code}) 进行机器学习分析...")
-                    # 从 context 中提取历史数据
+                    # 从 context 中提取历史数据，如果没有则尝试获取
                     historical_df = context.get('history') or context.get('historical_data') or context.get('kline')
+                    
+                    if historical_df is None or historical_df.empty:
+                        # 尝试从数据库获取历史数据
+                        try:
+                            from datetime import datetime, timedelta
+                            end_date = datetime.now().strftime('%Y-%m-%d')
+                            start_date = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
+                            
+                            # 尝试使用数据提供者管理器获取历史数据
+                            if hasattr(self, '_data_fetcher_manager') and self._data_fetcher_manager:
+                                historical_df = self._data_fetcher_manager.fetch_daily(code, start_date, end_date)
+                                if historical_df is not None and not historical_df.empty:
+                                    logger.info(f"[ML诊断] 从数据源获取到 {len(historical_df)} 条历史数据")
+                        except Exception as fetch_exc:
+                            logger.debug(f"[ML诊断] 获取历史数据失败: {fetch_exc}")
+                    
                     if historical_df is not None and not historical_df.empty:
                         ml_result = integrate_ml_analysis(code, historical_df, llm_analysis=result.analysis_summary)
                         if ml_result and 'combined_analysis' in ml_result:
                             # 将 ML 分析结果附加到报告中
                             result.analysis_summary = ml_result['combined_analysis']
+                            # 保存 ML 评分
+                            if 'ml_score' in ml_result:
+                                result.ml_score = int(ml_result['ml_score'])
+                            elif 'score' in ml_result:
+                                result.ml_score = int(ml_result['score'])
                             logger.info(f"[ML诊断] {name}({code}) 机器学习分析完成")
                     else:
                         logger.warning(f"[ML诊断] {name}({code}) 未找到历史数据，跳过 ML 分析")

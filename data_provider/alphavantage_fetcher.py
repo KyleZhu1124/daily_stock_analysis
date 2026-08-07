@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-AlphaVantageFetcher — US market data source (Priority 3)
+AlphaVantageFetcher — Global market data source (Priority 3)
 
 Data source: AlphaVantage REST API
 Rate limit: 25 calls/day, 5 calls/min (free tier)
-Markets: US only
+Markets: Global (US, A-shares, HK, etc.)
 """
 
 import logging
@@ -17,11 +17,28 @@ import requests
 
 from .base import BaseFetcher, DataFetchError, STANDARD_COLUMNS
 from .realtime_types import UnifiedRealtimeQuote, RealtimeSource
-from .us_index_mapping import is_us_stock_code
 
 logger = logging.getLogger(__name__)
 
 _AV_BASE_URL = "https://www.alphavantage.co/query"
+
+
+def _convert_symbol_av(stock_code: str) -> str:
+    """
+    转换股票代码为 AlphaVantage 格式
+    
+    A 股: 600519.SH -> 600519.SHH (上交所), 000001.SZ -> 000001.SHZ (深交所)
+    港股: 00700.HK -> 00700.HKG
+    美股: AAPL -> AAPL (不变)
+    """
+    code = stock_code.strip().upper()
+    if code.endswith('.SH'):
+        return code.replace('.SH', '.SHH')
+    elif code.endswith('.SZ'):
+        return code.replace('.SZ', '.SHZ')
+    elif code.endswith('.HK'):
+        return code.replace('.HK', '.HKG')
+    return code
 
 
 class AlphaVantageFetcher(BaseFetcher):
@@ -35,16 +52,11 @@ class AlphaVantageFetcher(BaseFetcher):
         if not self._api_key:
             logger.debug("[AlphaVantage] API key not configured, fetcher disabled")
 
-    def _is_us_stock(self, stock_code: str) -> bool:
-        return is_us_stock_code(stock_code)
-
     def _fetch_raw_data(self, stock_code: str, start_date: str, end_date: str) -> pd.DataFrame:
         if not self._api_key:
             raise DataFetchError("[AlphaVantage] API key not configured")
-        if not self._is_us_stock(stock_code):
-            raise DataFetchError(f"[AlphaVantage] {stock_code} is not a US stock")
 
-        symbol = stock_code.strip().upper()
+        symbol = _convert_symbol_av(stock_code)
         params = {
             'function': 'TIME_SERIES_DAILY',
             'symbol': symbol,
@@ -114,10 +126,10 @@ class AlphaVantageFetcher(BaseFetcher):
         return df
 
     def get_realtime_quote(self, stock_code: str) -> Optional[UnifiedRealtimeQuote]:
-        if not self._api_key or not self._is_us_stock(stock_code):
+        if not self._api_key:
             return None
 
-        symbol = stock_code.strip().upper()
+        symbol = _convert_symbol_av(stock_code)
         try:
             self.random_sleep(0.5, 1.5)
             resp = requests.get(_AV_BASE_URL, params={
@@ -159,10 +171,10 @@ class AlphaVantageFetcher(BaseFetcher):
         )
 
     def get_stock_name(self, stock_code: str) -> Optional[str]:
-        if not self._api_key or not self._is_us_stock(stock_code):
+        if not self._api_key:
             return None
 
-        symbol = stock_code.strip().upper()
+        symbol = _convert_symbol_av(stock_code)
         try:
             resp = requests.get(_AV_BASE_URL, params={
                 'function': 'SYMBOL_SEARCH',

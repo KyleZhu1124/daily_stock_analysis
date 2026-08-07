@@ -1014,9 +1014,12 @@ def run_full_analysis(
             logger.info("\n===== 分析结果摘要 =====")
             for r in sorted(results, key=lambda x: x.sentiment_score, reverse=True):
                 emoji = r.get_emoji()
+                # 分栏显示评分
+                tech_score_str = f"技术{r.technical_score}" if r.technical_score is not None else "技术--"
+                ml_score_str = f"ML{r.ml_score}" if r.ml_score is not None else "ML--"
                 logger.info(
                     f"{emoji} {r.name}({r.code}): {r.operation_advice} | "
-                    f"评分 {r.sentiment_score} | {r.trend_prediction}"
+                    f"综合{r.sentiment_score} | {tech_score_str} | {ml_score_str} | {r.trend_prediction}"
                 )
 
         logger.info("\n任务执行完成")
