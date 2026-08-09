@@ -1,7 +1,12 @@
 """
 集成模型架构
 结合LightGBM、XGBoost、CatBoost和神经网络
+支持GPU加速和并行训练
 """
+
+import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).parent.parent.parent))
 
 import numpy as np
 import pandas as pd
@@ -11,8 +16,11 @@ from sklearn.metrics import accuracy_score, roc_auc_score, mean_squared_error
 import lightgbm as lgb
 import xgboost as xgb
 from catboost import CatBoostRegressor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import warnings
 warnings.filterwarnings('ignore')
+
+from config import GPU_DEVICE, MAX_CONCURRENT_MODELS
 
 
 class EnsembleModel:
@@ -29,7 +37,7 @@ class EnsembleModel:
         self.is_trained = False
         
     def _init_models(self):
-        """初始化各个模型"""
+        """初始化各个模型 - 启用GPU加速"""
         if self.task_type == 'classification':
             # 分类任务：预测涨跌
             self.models['lightgbm'] = lgb.LGBMClassifier(
@@ -40,7 +48,11 @@ class EnsembleModel:
                 subsample=0.8,
                 colsample_bytree=0.8,
                 random_state=42,
-                verbose=-1
+                verbose=-1,
+                device='gpu',
+                gpu_platform_id=0,
+                gpu_device_id=GPU_DEVICE,
+                n_jobs=-1  # 使用所有CPU核心
             )
             
             self.models['xgboost'] = xgb.XGBClassifier(
@@ -50,7 +62,10 @@ class EnsembleModel:
                 subsample=0.8,
                 colsample_bytree=0.8,
                 random_state=42,
-                verbosity=0
+                verbosity=0,
+                tree_method='gpu_hist',  # GPU加速
+                gpu_id=GPU_DEVICE,
+                n_jobs=-1
             )
             
             self.models['catboost'] = CatBoostRegressor(
@@ -59,7 +74,9 @@ class EnsembleModel:
                 learning_rate=0.05,
                 l2_leaf_reg=3,
                 random_seed=42,
-                verbose=False
+                verbose=False,
+                task_type='GPU',
+                devices=str(GPU_DEVICE)
             )
             
         else:
@@ -72,7 +89,11 @@ class EnsembleModel:
                 subsample=0.8,
                 colsample_bytree=0.8,
                 random_state=42,
-                verbose=-1
+                verbose=-1,
+                device='gpu',
+                gpu_platform_id=0,
+                gpu_device_id=GPU_DEVICE,
+                n_jobs=-1
             )
             
             self.models['xgboost'] = xgb.XGBRegressor(
@@ -82,7 +103,10 @@ class EnsembleModel:
                 subsample=0.8,
                 colsample_bytree=0.8,
                 random_state=42,
-                verbosity=0
+                verbosity=0,
+                tree_method='gpu_hist',
+                gpu_id=GPU_DEVICE,
+                n_jobs=-1
             )
             
             self.models['catboost'] = CatBoostRegressor(
@@ -91,21 +115,25 @@ class EnsembleModel:
                 learning_rate=0.05,
                 l2_leaf_reg=3,
                 random_seed=42,
-                verbose=False
+                verbose=False,
+                task_type='GPU',
+                devices=str(GPU_DEVICE)
             )
     
     def train(self, X_train: pd.DataFrame, y_train: pd.Series, 
               X_val: pd.DataFrame = None, y_val: pd.Series = None) -> Dict:
-        """训练集成模型"""
+        """训练集成模型 - 并行训练所有模型"""
         self._init_models()
         
         metrics = {}
         
-        # 训练每个模型
-        for name, model in self.models.items():
+        # 定义单个模型训练函数
+        def train_single_model(name, model):
+            print(f"训练 {name}...")
+            
             if name == 'catboost' and self.task_type == 'classification':
                 # CatBoost分类需要特殊处理
-                model.fit(X_train, y_train, eval_set=(X_val, y_val) if X_val is not None else None, verbose=False)
+                model.fit(X_train, y_train, eval_set=(X_val, y_val) if X_val is not None else None)
             else:
                 model.fit(X_train, y_train)
             
@@ -118,13 +146,33 @@ class EnsembleModel:
                         y_prob = model.predict_proba(X_val)[:, 1]
                         auc = roc_auc_score(y_val, y_prob)
                         acc = accuracy_score(y_val, y_pred)
-                        metrics[name] = {'auc': auc, 'accuracy': acc}
+                        return name, {'auc': auc, 'accuracy': acc}, model
                     else:
                         mse = mean_squared_error(y_val, y_pred)
-                        metrics[name] = {'mse': mse}
+                        return name, {'mse': mse}, model
                 else:
                     mse = mean_squared_error(y_val, y_pred)
-                    metrics[name] = {'mse': mse}
+                    return name, {'mse': mse}, model
+            return name, {}, model
+        
+        # 并行训练所有模型
+        print(f"\n开始并行训练 {len(self.models)} 个模型...")
+        with ThreadPoolExecutor(max_workers=len(self.models)) as executor:
+            futures = [executor.submit(train_single_model, name, model) 
+                      for name, model in self.models.items()]
+            
+            for future in as_completed(futures):
+                name, model_metrics, trained_model = future.result()
+                metrics[name] = model_metrics
+                
+                if model_metrics:
+                    if self.task_type == 'classification':
+                        if 'auc' in model_metrics:
+                            print(f"  {name} - AUC: {model_metrics['auc']:.4f}, Accuracy: {model_metrics['accuracy']:.4f}")
+                        else:
+                            print(f"  {name} - MSE: {model_metrics['mse']:.4f}")
+                    else:
+                        print(f"  {name} - MSE: {model_metrics['mse']:.4f}")
         
         # 计算权重（基于验证集性能）
         if X_val is not None and self.task_type == 'classification':
@@ -241,11 +289,13 @@ class StockPredictor:
         print(f"训练集大小: {len(X_train)}, 验证集大小: {len(X_val)}")
         
         # 训练分类模型
+        print("\n=== 训练分类模型（涨跌预测）===")
         class_metrics = self.classification_model.train(
             X_train, y_class_train, X_val, y_class_val
         )
         
         # 训练回归模型
+        print("\n=== 训练回归模型（涨幅预测）===")
         reg_metrics = self.regression_model.train(
             X_train, y_reg_train, X_val, y_reg_val
         )
