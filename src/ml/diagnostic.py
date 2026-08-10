@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 class MLDiagnostician:
     """ML诊断器 - 整合趋势预测和风险评估"""
     
-    def __init__(self, prediction_horizon: int = 5, timeout_minutes: int = 10):
+    def __init__(self, prediction_horizon: int = 5, timeout_minutes: int = 30):
         """
         Args:
             prediction_horizon: 预测未来天数
