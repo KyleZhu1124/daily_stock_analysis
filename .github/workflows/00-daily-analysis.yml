@@ -36,7 +36,7 @@ jobs:
     environment: STOCK_LIST
     # 添加超时限制，防止任务卡死
     # 每只股票约需 3-5 分钟，15 只股票需要 45-75 分钟
-    timeout-minutes: ${{ fromJSON(vars.ANALYSIS_TIMEOUT_MINUTES || '90') }}
+    timeout-minutes: ${{ fromJSON(vars.ANALYSIS_TIMEOUT_MINUTES || '120') }}
     
     steps:
       - name: 随机延迟（避免固定时间访问）

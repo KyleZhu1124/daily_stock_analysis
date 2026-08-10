@@ -8,6 +8,7 @@ import numpy as np
 from typing import Dict, Optional
 import logging
 from datetime import datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 
 from .feature_engineering import FeatureEngineering
 from .model import TrendPredictor
@@ -19,19 +20,21 @@ logger = logging.getLogger(__name__)
 class MLDiagnostician:
     """ML诊断器 - 整合趋势预测和风险评估"""
     
-    def __init__(self, prediction_horizon: int = 5):
+    def __init__(self, prediction_horizon: int = 5, timeout_minutes: int = 10):
         """
         Args:
             prediction_horizon: 预测未来天数
+            timeout_minutes: 单只股票ML诊断超时时间（分钟）
         """
         self.prediction_horizon = prediction_horizon
+        self.timeout_minutes = timeout_minutes
         self.trend_predictor = TrendPredictor(prediction_horizon)
         self.risk_assessor = RiskAssessor()
         self.feature_eng = FeatureEngineering()
     
     def diagnose(self, stock_code: str, df: pd.DataFrame, train_model: bool = True) -> Dict:
         """
-        对单只股票进行ML诊断
+        对单只股票进行ML诊断（带超时控制）
         
         Args:
             stock_code: 股票代码
@@ -53,6 +56,33 @@ class MLDiagnostician:
             'timestamp': datetime.now().isoformat(),
             'data_points': len(df)
         }
+        
+        # 使用线程池实现超时控制
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(self._diagnose_internal, stock_code, df, train_model)
+            
+            try:
+                # 等待结果，超时则跳过
+                diagnosis_result = future.result(timeout=self.timeout_minutes * 60)
+                result.update(diagnosis_result)
+                logger.info(f"[{stock_code}] ML诊断完成，耗时在{self.timeout_minutes}分钟内")
+                
+            except FuturesTimeoutError:
+                logger.warning(f"[{stock_code}] ML诊断超时（>{self.timeout_minutes}分钟），跳过该股票")
+                result['error'] = f'ML诊断超时（>{self.timeout_minutes}分钟），已跳过'
+                result['skipped'] = True
+                
+            except Exception as e:
+                logger.error(f"[{stock_code}] ML诊断失败: {str(e)}")
+                result['error'] = str(e)
+        
+        return result
+    
+    def _diagnose_internal(self, stock_code: str, df: pd.DataFrame, train_model: bool) -> Dict:
+        """
+        内部诊断方法（实际执行ML分析）
+        """
+        result = {}
         
         try:
             # 1. 训练模型（每次都训练，使用所有历史数据）
